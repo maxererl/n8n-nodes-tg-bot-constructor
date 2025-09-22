@@ -178,7 +178,7 @@ export async function apiRequest(
 		uri: `${credentials.baseUrl}/bot${credentials.accessToken}/${endpoint}`,
 		body,
 		qs: query,
-		json: true //!(body instanceof FormData),
+		json: true,
 	};
 	if (Object.keys(option).length > 0) {
 		Object.assign(options, option);

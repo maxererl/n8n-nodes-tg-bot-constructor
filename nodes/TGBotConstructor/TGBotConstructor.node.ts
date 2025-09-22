@@ -31,7 +31,6 @@ const configuredOutputs = (parameters: INodeParameters) => {
 		};
 		const inlineButtons = (((parameters.inlineKeyboard as IDataObject)?.rows as IDataObject[]) ?? []).flatMap(r => (r?.row as IDataObject[] ?? [])).flatMap(row => row?.buttons as IDataObject[] ?? []) ?? [];
 		const ruleOutputs = inlineButtons.map((inlineButton, index) => {
-			(inlineButton.additionalFields as IDataObject).callback_data = index + 1;
 			return {
 				type: 'main',
 				displayName: inlineButton.text || index.toString(),
@@ -106,23 +105,6 @@ export class TGBotConstructor implements INodeType {
 					}
 				],
 				default: 'sendMessage',
-			},
-			{
-				displayName: 'Chat ID',
-				name: 'chatId',
-				type: 'string',
-				default: '={{ $json.body?.message?.from?.id || $json.body.callback_query.from.id }}',
-				displayOptions: {
-					show: {
-						operation: [
-							'sendMessage'
-						],
-						resource: ['message'],
-					},
-				},
-				required: true,
-				description:
-					'Unique identifier for the target chat or username, To find your chat ID ask @get_id_bot',
 			},
 			{
 				displayName: 'Text',
@@ -208,23 +190,6 @@ export class TGBotConstructor implements INodeType {
 												default: '',
 												description: 'Label text on the button',
 											},
-											{
-												displayName: 'Additional Fields',
-												name: 'additionalFields',
-												type: 'collection',
-												placeholder: 'Add Field',
-												default: {},
-												options: [
-													{
-														displayName: 'Callback Data',
-														name: 'callback_data',
-														type: 'string',
-														default: '',
-														description:
-															'Data to be sent in a callback query to the bot when button is pressed, 1-64 bytes',
-													}
-												],
-											}
 										],
 									},
 								],
@@ -248,6 +213,14 @@ export class TGBotConstructor implements INodeType {
 				},
 				default: {},
 				options: [
+					{
+						displayName: 'Chat ID',
+						name: 'chatId',
+						type: 'string',
+						default: '={{ $json.body?.message?.from?.id || $json.body.callback_query.from.id }}',
+						description:
+							'Unique identifier for the target chat or username, To find your chat ID ask @get_id_bot',
+					},
 					{
 						displayName: 'Edit Message ID',
 						name: 'message_id',
@@ -306,18 +279,6 @@ export class TGBotConstructor implements INodeType {
 						],
 					},
 					{
-						displayName: 'Reply To Message ID',
-						name: 'reply_to_message_id',
-						type: 'number',
-						displayOptions: {
-							hide: {
-								'/operation': ['editMessageText'],
-							},
-						},
-						default: 0,
-						description: 'If the message is a reply, ID of the original message',
-					},
-					{
 						displayName: 'Parse Mode',
 						name: 'parse_mode',
 						type: 'options',
@@ -345,6 +306,18 @@ export class TGBotConstructor implements INodeType {
 						default: 'HTML',
 						description: 'How to parse the text',
 					},
+					{
+						displayName: 'Reply To Message ID',
+						name: 'reply_to_message_id',
+						type: 'number',
+						displayOptions: {
+							hide: {
+								'/operation': ['editMessageText'],
+							},
+						},
+						default: 0,
+						description: 'If the message is a reply, ID of the original message',
+					},
 				],
 			}
 		],
@@ -360,6 +333,7 @@ export class TGBotConstructor implements INodeType {
 			: undefined;
 
 		const inlineButtons = (inlineKeyboard?.rows ?? []).flatMap(r => r?.row ?? []).flatMap(row => row?.buttons ?? []) ?? [];
+		inlineButtons.forEach((b, i) => b.additionalFields = { callback_data: i+1 });
 		const returnArray: INodeExecutionData[][] = Array.from({length: inlineButtons.length}, () => []);
 
 		// For Post
@@ -385,7 +359,7 @@ export class TGBotConstructor implements INodeType {
 			const routingIndex = isCompletedNode(nodesPath, userMap);
 
 			// Routing logic if roadmap is persist and node already completed
-			if (routingIndex) {
+			if (routingIndex !== undefined && !Number.isNaN(routingIndex)) {
 				// Making item path
 				if (!nodesPath) items[i].json.path = [this.getNode().name];
 				else nodesPath.push(this.getNode().name);
@@ -418,8 +392,8 @@ export class TGBotConstructor implements INodeType {
 							const mediaProperties = (additionalFields?.media as IDataObject)?.mediaProperties as IDataObject[];
 							const binaryData = items[i].binary as IDataObject;
 
-							body.chat_id = this.getNodeParameter('chatId', i) as string;
-
+							body.chat_id = (additionalFields?.chatId || (((items[i]?.json?.body as IDataObject)?.message as IDataObject)?.from as IDataObject)?.id || (((items[i]?.json?.body as IDataObject)?.callback_query as IDataObject)?.from as IDataObject)?.id) as string;
+							delete additionalFields.chatId;
 							// Set new callback_data
 							inlineButtons.forEach((inlineButton) => {
 								(inlineButton.additionalFields as IDataObject).callback_data =
@@ -587,8 +561,16 @@ export class TGBotConstructor implements INodeType {
 
 					let responseData = await apiRequest.call(this, requestMethod, endpoint, formData? {}:body, qs, formData? {formData} : undefined);
 
+					// Main output routing
+					if (callback_query) {
+						callback_query.data = (callback_query.data ? userMap : '') + ',0';
+					} else {
+						(items[i].json.body as IDataObject).callback_query = { data: '0' };
+					}
+					if (!nodesPath) items[i].json.path = [this.getNode().name];
+					else nodesPath.push(this.getNode().name);
 					const executionData = this.helpers.constructExecutionMetaData(
-						this.helpers.returnJsonArray(responseData as IDataObject[]),
+						this.helpers.returnJsonArray([{...items[i].json, output: responseData}] as IDataObject[]),
 						{ itemData: { item: i } },
 					);
 					returnData.push(...executionData);
